@@ -2,7 +2,7 @@ name: Build OpenGothic 0.6.7 FIX25 FallDeath
 
 on:
   push:
-    branches: [master]
+    branches: [falldeath-fix25-isolated]
     paths:
       - apply_067.py
       - ci/prepare_turnip.sh
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: opengothic-fix25-falldeath
+  group: opengothic-fix25-falldeath-isolated
   cancel-in-progress: true
 
 permissions:
@@ -23,7 +23,7 @@ env:
 
 jobs:
   android-arm64:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
