@@ -840,3 +840,59 @@ replace_once(
 )
 
 print("FALLDEATH V2: original landing transitions and orientation preservation applied")
+
+
+# FALLDEATH V3: match ZenGin's deep-fall direction and lethal landing order.
+replace_once(
+    "common/game/movealgo.cpp",
+'''      if(height>h0) {
+        npc.setAnim(AnimationSolver::FallDeep);
+        npc.setAnimRotate(0);
+        setState(Falling);
+        }
+''',
+'''      if(height>h0) {
+        Tempest::Vec3 fallForward;
+        applyRotation(fallForward,Tempest::Vec3(0,0,1));
+        const bool fallBack = Tempest::Vec3::dotProduct(fallForward,fallSpeed)<0.f;
+        npc.setAnim(fallBack ? AnimationSolver::FallDeepB : AnimationSolver::FallDeepA);
+        npc.setAnimRotate(0);
+        setState(Falling);
+        }
+'''
+)
+
+replace_once(
+    "common/world/objects/npc.cpp",
+'''  if(death)
+    physic.setEnable(false);
+''',
+'''  if(death) {
+    // Gothic II restores collision after CreateFallDamage(). Preserve collision
+    // for a lethal fall while retaining the existing behavior for other deaths.
+    physic.setEnable(isFallDamage);
+    }
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''  if(state==InAir || state==Falling) {
+    // attach to ground
+    npc.takeFallDamage(fallSpeed);
+    setState(Run);
+    }
+''',
+'''  if(state==InAir || state==Falling) {
+    // attach to ground
+    npc.takeFallDamage(fallSpeed);
+    setState(Run);
+    // ZenGin CheckFallStates() ends after fall damage/collision restoration.
+    // Avoid extra same-frame ground/slide correction on a newly dead fall victim.
+    if(npc.isDead())
+      return true;
+    }
+'''
+)
+
+print("FALLDEATH V3: deep-fall direction, collision restore and lethal landing return applied")
