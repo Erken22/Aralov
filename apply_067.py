@@ -788,3 +788,55 @@ replace_once(
 )
 
 print("FIX25 + ZenGin-style FALL damage animation suppression applied")
+
+
+# FALLDEATH V2: preserve active fall orientation and use ZenGin landing transitions.
+#
+# ZenGin CheckFallStates() does not recompute front/back from velocity on impact.
+# It checks whether S_FALL or S_FALLB is already active, then starts the matching
+# T_FALL_2_FALLEN / T_FALLB_2_FALLENB transition before CreateFallDamage().
+replace_once(
+    "common/world/objects/npc.cpp",
+'''      const float a  = angleDir(-fallSpeed.x,-fallSpeed.z);
+      const float da = a-angle;
+      if(std::cos(da*M_PI/180.0)<0 || Vec2(fallSpeed.x,fallSpeed.z).length()<0.1f)
+        lastHitType='A'; else
+        lastHitType='B';
+      setAnim(lastHitType=='A' ? Anim::FallenA : Anim::FallenB);
+''',
+'''      // Match ZenGin CheckFallStates(): preserve the fall orientation that is
+      // already active instead of deriving a new one from impact velocity.
+      const bool fallBack = visual.pose().isInAnim("S_FALLB");
+      lastHitType = fallBack ? 'B' : 'A';
+      setAnim(fallBack ? Anim::FallenB : Anim::FallenA);
+'''
+)
+
+replace_once(
+    "common/graphics/mesh/animationsolver.cpp",
+'''  if(a==Anim::FallenA)
+    return solveFrm("S_FALLEN");
+  if(a==Anim::FallenB)
+    return solveFrm("S_FALLENB");
+''',
+'''  if(a==Anim::FallenA) {
+    // Vanilla Gothic lands through T_FALL_2_FALLEN. Besides looking correct,
+    // this preserves the original root-motion/contact with the ground.
+    if(pose.isInAnim("S_FALL")) {
+      if(auto ret = solveFrm("T_FALL_2_FALLEN"))
+        return ret;
+      }
+    return solveFrm("S_FALLEN");
+    }
+  if(a==Anim::FallenB) {
+    // Same for the backward fall; do not turn it into the forward variant.
+    if(pose.isInAnim("S_FALLB")) {
+      if(auto ret = solveFrm("T_FALLB_2_FALLENB"))
+        return ret;
+      }
+    return solveFrm("S_FALLENB");
+    }
+'''
+)
+
+print("FALLDEATH V2: original landing transitions and orientation preservation applied")
