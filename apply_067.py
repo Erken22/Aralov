@@ -804,3 +804,31 @@ replace_once(
 '''
 )
 print("Ubuntu 22 glslang compatibility applied")
+
+
+# Public-builder shader compiler compatibility.
+# OpenGothic already has a complete glslc argument-conversion path. On Android,
+# prefer the NDK-provided glslc over Ubuntu 22.04's older system
+# glslangValidator, which lacks the preamble CLI used by this source snapshot.
+replace_once(
+    "shader/CMakeLists.txt",
+    '''find_program(GLSLANGVALIDATOR glslangValidator "/opt/homebrew/bin" NO_CMAKE_FIND_ROOT_PATH)
+if(NOT GLSLANGVALIDATOR AND ANDROID)
+''',
+    '''find_program(GLSLANGVALIDATOR glslangValidator "/opt/homebrew/bin" NO_CMAKE_FIND_ROOT_PATH)
+
+# Prefer the NDK glslc on Android. The add_shader() function below already
+# translates glslang arguments correctly when SHADER_COMPILER_NAME == glslc.
+if(ANDROID)
+  foreach(OG_GLSLC_HOST linux-x86_64 windows-x86_64 darwin-x86_64)
+    if(EXISTS "\${ANDROID_NDK}/shader-tools/\${OG_GLSLC_HOST}/glslc")
+      set(GLSLANGVALIDATOR "\${ANDROID_NDK}/shader-tools/\${OG_GLSLC_HOST}/glslc")
+      break()
+    endif()
+  endforeach()
+endif()
+
+if(NOT GLSLANGVALIDATOR AND ANDROID)
+'''
+)
+print("Android shader compiler: prefer NDK glslc")
