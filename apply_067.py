@@ -1090,3 +1090,43 @@ replace_once(
 )
 
 print("FALLDEATH V6: finished lethal landing has zero root-motion")
+
+
+# FALLDEATH V7: align character-to-landscape primitive width with ZenGin.
+#
+# Gothic II zCCollObjectCharacter::GetPrimitiveCC() creates its collision
+# primitive and scales the primitive dimensions by 1.2 (constant at 0x831EF0).
+# OpenGothic builds a narrower HumShape directly from the visual bbox. This is
+# especially visible while falling close to roofs/walls: vanilla catches the
+# surface while the narrower OpenGothic capsule can pass beside it.
+#
+# Increase only the capsule radius. cHeight is recomputed from the same total
+# height, so the overall vertical collision extent/ground elevation stays
+# unchanged; this avoids introducing a 20% height/step offset.
+replace_once(
+    "common/physics/dynamicworld.cpp",
+'''    auto  size    = max - min;
+    float radius  = std::min(size.y*0.5f, std::min(size.x, size.z))*0.5f; // npc-to-landscape collision size
+    float height  = size.y;
+
+    // ghostPadding = 90;
+    float ghostPadding = height*0.5f;
+    float cHeight      = std::max(height-2.f*radius-ghostPadding, 0.f);
+''',
+'''    auto  size    = max - min;
+    float radius  = std::min(size.y*0.5f, std::min(size.x, size.z))*0.5f; // npc-to-landscape collision size
+    float height  = size.y;
+
+    // ZenGin zCCollObjectCharacter::GetPrimitiveCC() scales its primitive by
+    // 1.2. Preserve OpenGothic's vertical extent, but match the wider contact
+    // footprint used for hard landscape collisions.
+    static const float zenGinPrimitiveScale = 1.2f;
+    radius *= zenGinPrimitiveScale;
+
+    // ghostPadding = 90;
+    float ghostPadding = height*0.5f;
+    float cHeight      = std::max(height-2.f*radius-ghostPadding, 0.f);
+'''
+)
+
+print("FALLDEATH V7: ZenGin 1.2x landscape collision radius applied")
