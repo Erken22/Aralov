@@ -788,3 +788,19 @@ replace_once(
 )
 
 print("FIX25 + ZenGin-style FALL damage animation suppression applied")
+
+
+# Public-builder compatibility: Ubuntu 22.04 ships glslang 11.8, which
+# supports the legacy attached -P<text> form but not the newer "--P <text>"
+# spelling used by this OpenGothic snapshot. The preamble itself is identical.
+replace_once(
+    "shader/CMakeLists.txt",
+    '''    list(APPEND GLSL_CMD "--P")
+    list(APPEND GLSL_CMD "#extension GL_GOOGLE_include_directive:enable")
+''',
+    '''    # Ubuntu 22 glslang compatibility: use the equivalent attached
+    # preamble form understood by older validators.
+    list(APPEND GLSL_CMD "-P#extension GL_GOOGLE_include_directive:enable")
+'''
+)
+print("Ubuntu 22 glslang compatibility applied")
