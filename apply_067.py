@@ -817,15 +817,32 @@ if(NOT GLSLANGVALIDATOR AND ANDROID)
 ''',
     '''find_program(GLSLANGVALIDATOR glslangValidator "/opt/homebrew/bin" NO_CMAKE_FIND_ROOT_PATH)
 
-# Prefer the NDK glslc on Android. The add_shader() function below already
-# translates glslang arguments correctly when SHADER_COMPILER_NAME == glslc.
+# Prefer the NDK glslc on Android. Android toolchain files reliably expose
+# CMAKE_ANDROID_NDK; ANDROID_NDK is not guaranteed to be populated.
 if(ANDROID)
+  set(OG_NDK_ROOT "\${CMAKE_ANDROID_NDK}")
+  if(NOT OG_NDK_ROOT)
+    set(OG_NDK_ROOT "\${ANDROID_NDK}")
+  endif()
+  if(NOT OG_NDK_ROOT AND DEFINED ENV{ANDROID_NDK_HOME})
+    set(OG_NDK_ROOT "$ENV{ANDROID_NDK_HOME}")
+  endif()
+
+  set(OG_NDK_GLSLC "")
   foreach(OG_GLSLC_HOST linux-x86_64 windows-x86_64 darwin-x86_64)
-    if(EXISTS "\${ANDROID_NDK}/shader-tools/\${OG_GLSLC_HOST}/glslc")
-      set(GLSLANGVALIDATOR "\${ANDROID_NDK}/shader-tools/\${OG_GLSLC_HOST}/glslc")
+    if(EXISTS "\${OG_NDK_ROOT}/shader-tools/\${OG_GLSLC_HOST}/glslc")
+      set(OG_NDK_GLSLC "\${OG_NDK_ROOT}/shader-tools/\${OG_GLSLC_HOST}/glslc")
       break()
     endif()
   endforeach()
+
+  if(OG_NDK_GLSLC)
+    unset(GLSLANGVALIDATOR CACHE)
+    set(GLSLANGVALIDATOR "\${OG_NDK_GLSLC}")
+    message(STATUS "OpenGothic Android shader compiler: \${GLSLANGVALIDATOR}")
+  else()
+    message(FATAL_ERROR "NDK glslc not found under \${OG_NDK_ROOT}/shader-tools")
+  endif()
 endif()
 
 if(NOT GLSLANGVALIDATOR AND ANDROID)
