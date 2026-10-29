@@ -1045,3 +1045,48 @@ replace_once(
 )
 
 print("FALLDEATH V5: lethal fall keeps dead landing pose and suppresses FALLEN ambient")
+
+
+# FALLDEATH V6: stop root-motion after the frozen lethal landing transition.
+#
+# T_FALL*_2_FALLEN* carries movement translation. V5 intentionally keeps the
+# transition on its final frame for a vanilla-style corpse pose, but a fly/root
+# animation is not clamped by Animation::Sequence::translateXZ(). As a result
+# dead Npc::tick() can keep consuming animMoveSpeed() and slowly "crawl".
+#
+# Preserve root-motion while the landing transition is actually playing, then
+# return zero movement once that BS_DEAD transition has finished.
+replace_once(
+    "common/graphics/mesh/pose.cpp",
+'''Tempest::Vec3 Pose::animMoveSpeed(uint64_t tickCount, uint64_t dt) const {
+  for(size_t i=lay.size(); i>0; ) {
+    --i;
+    auto& lx = lay[i];
+    if(!lx.seq->data->hasMoveTr)
+      continue;
+    return lx.seq->speed(tickCount-lx.sAnim,dt);
+    }
+  return Tempest::Vec3();
+  }
+''',
+'''Tempest::Vec3 Pose::animMoveSpeed(uint64_t tickCount, uint64_t dt) const {
+  for(size_t i=lay.size(); i>0; ) {
+    --i;
+    auto& lx = lay[i];
+
+    const bool deadFallLanding =
+        lx.bs==BS_DEAD &&
+        (lx.seq->name=="T_FALL_2_FALLEN" || lx.seq->name=="T_FALLB_2_FALLENB");
+    if(deadFallLanding && lx.seq->isFinished(tickCount,lx.sAnim,combo.len()))
+      return Tempest::Vec3();
+
+    if(!lx.seq->data->hasMoveTr)
+      continue;
+    return lx.seq->speed(tickCount-lx.sAnim,dt);
+    }
+  return Tempest::Vec3();
+  }
+'''
+)
+
+print("FALLDEATH V6: finished lethal landing has zero root-motion")
