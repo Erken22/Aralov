@@ -1,4 +1,4 @@
-name: Build OpenGothic 0.6.7 FIX25 FallDeath
+name: Build OpenGothic 0.6.7 FIX25 FallDeath V2
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: opengothic-fix25-falldeath-isolated
+  group: opengothic-fix25-falldeath-v2-isolated
   cancel-in-progress: true
 
 permissions:
@@ -46,7 +46,10 @@ jobs:
         run: |
           grep -Fq 'changeAttribute(ATR_HITPOINTS,-dmg.value,false,true);' src/common/world/objects/npc.cpp
           grep -Fq 'if(!isFallDamage)' src/common/world/objects/npc.cpp
-          echo "FallDeath source verification: PASS"
+          grep -Fq 'const bool fallBack = visual.pose().isInAnim("S_FALLB");' src/common/world/objects/npc.cpp
+          grep -Fq 'T_FALL_2_FALLEN' src/common/graphics/mesh/animationsolver.cpp
+          grep -Fq 'T_FALLB_2_FALLENB' src/common/graphics/mesh/animationsolver.cpp
+          echo "FallDeath V2 source verification: PASS"
 
       - uses: actions/setup-java@v5
         with:
@@ -80,12 +83,12 @@ jobs:
         shell: bash
         run: bash ci/prepare_turnip.sh
 
-      - name: Generate FIX25 FallDeath build ID
+      - name: Generate FIX25 FallDeath V2 build ID
         shell: bash
         run: |
           {
             echo '#pragma once'
-            echo 'static const char* appBuild = "OpenGothic 0.6.7 FIX25 FallDeath";'
+            echo 'static const char* appBuild = "OpenGothic 0.6.7 FIX25 FallDeath V2";'
           } > src/game/build.h
 
       - name: Configure Android ARM64
@@ -99,7 +102,7 @@ jobs:
         run: |
           "$ANDROID_HOME/cmake/3.22.1/bin/cmake" --build src/build/android --target OpenGothic-apk -- -j2
 
-      - name: Sign and verify FIX25 FallDeath
+      - name: Sign and verify FIX25 FallDeath V2
         shell: bash
         run: |
           APK=""
@@ -111,7 +114,7 @@ jobs:
           done < <(find src/build/android -path '*/build/outputs/apk/*/*.apk' -type f | sort)
           test -n "$APK"
 
-          OUT="GothicLauncher-arm64-OpenGothic067-FIX25-FALLDEATH.apk"
+          OUT="GothicLauncher-arm64-OpenGothic067-FIX25-FALLDEATH-V2.apk"
           # Isolated repository: use its own ephemeral test signing key.
           # This intentionally cannot install over the main FIX25/FIX26 builds.
           keytool -genkeypair -noprompt             -keystore falldeath-test.keystore             -storepass android -keypass android             -alias falldeath             -keyalg RSA -keysize 2048 -validity 3650             -dname "CN=OpenGothic FallDeath Test,O=Local Test,C=KZ"
@@ -152,12 +155,12 @@ jobs:
             exit 1
           fi
 
-          strings packaged-libopengothic.so | grep -F "OpenGothic 0.6.7 FIX25 FallDeath"
+          strings packaged-libopengothic.so | grep -F "OpenGothic 0.6.7 FIX25 FallDeath V2"
           strings packaged-libopengothic.so | grep -F "FIX23 fence waits: Turnip Adreno 650 uses targeted native completion"
           strings packaged-libopengothic.so | grep -F "Shadow startup: standard shadow maps; unrequested virtual shadow pipelines skipped"
           strings packaged-libopengothic.so | grep -F "FIX25 material mode:"
           sha256sum "$OUT" | tee apk-sha256.txt
-          echo "FIX25 FallDeath packaging/linkage verification: PASS"
+          echo "FIX25 FallDeath V2 packaging/linkage verification: PASS"
 
       - name: Preserve exact native symbols
         shell: bash
@@ -181,9 +184,9 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: OpenGothic-FIX25-FallDeath-verified
+          name: OpenGothic-FIX25-FallDeath-V2-verified
           path: |
-            GothicLauncher-arm64-OpenGothic067-FIX25-FALLDEATH.apk
+            GothicLauncher-arm64-OpenGothic067-FIX25-FALLDEATH-V2.apk
             apk-sha256.txt
             apk-signature.txt
             apk-badging.txt
@@ -211,5 +214,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release delete fix25-falldeath --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create fix25-falldeath             GothicLauncher-arm64-OpenGothic067-FIX25-FALLDEATH.apk             apk-badging.txt apk-sha256.txt apk-signature.txt needed.txt vulkan-exports.txt FIX25-native-symbols.tar.gz             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "OpenGothic 0.6.7 FIX25 — isolated original fall death"             --notes "Isolated repository based exactly on FIX25. Preserves FIX25 Turnip/material/rendering behavior and changes only lethal deep-fall death handling: keep the already selected S_FALLEN/S_FALLENB pose instead of starting generic T_DEAD/T_DEADB. Other death sources remain unchanged. Uses an isolated test signing key, so uninstall the main-signed build before installing this APK."             --prerelease
+          gh release delete fix25-falldeath-v2 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create fix25-falldeath-v2             GothicLauncher-arm64-OpenGothic067-FIX25-FALLDEATH-V2.apk             apk-badging.txt apk-sha256.txt apk-signature.txt needed.txt vulkan-exports.txt FIX25-native-symbols.tar.gz             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "OpenGothic 0.6.7 FIX25 — original fall death V2"             --notes "V2 is isolated on FIX25. In addition to suppressing generic T_DEAD/T_DEADB for FALL damage, it now mirrors ZenGin CheckFallStates: preserve the already active S_FALL/S_FALLB orientation and land through T_FALL_2_FALLEN/T_FALLB_2_FALLENB instead of snapping directly to S_FALLEN/S_FALLENB. This targets backward-fall auto-turning and incorrect ground contact. Other death sources remain unchanged. Uses an isolated test signing key."             --prerelease
