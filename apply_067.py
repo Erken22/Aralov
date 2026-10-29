@@ -896,3 +896,87 @@ replace_once(
 )
 
 print("FALLDEATH V3: deep-fall direction, collision restore and lethal landing return applied")
+
+
+# FALLDEATH V4: do not restart forced deep-fall animation every frame.
+#
+# FallDeepA/FallDeepB are force animations in MdlVisual::startAnimAndGet():
+# every call stops all animations first. MoveAlgo runs the airborne branch every
+# frame, so V3 repeatedly restarted S_FALL/S_FALLB at frame 0. Select direction
+# only once when entering Falling, and use the original FALLDN transition.
+replace_once(
+    "common/game/movealgo.cpp",
+'''      if(height>h0) {
+        Tempest::Vec3 fallForward;
+        applyRotation(fallForward,Tempest::Vec3(0,0,1));
+        const bool fallBack = Tempest::Vec3::dotProduct(fallForward,fallSpeed)<0.f;
+        npc.setAnim(fallBack ? AnimationSolver::FallDeepB : AnimationSolver::FallDeepA);
+        npc.setAnimRotate(0);
+        setState(Falling);
+        }
+''',
+'''      if(height>h0) {
+        if(state!=Falling) {
+          Tempest::Vec3 fallForward;
+          applyRotation(fallForward,Tempest::Vec3(0,0,1));
+          const bool fallBack = Tempest::Vec3::dotProduct(fallForward,fallSpeed)<0.f;
+          npc.setAnim(fallBack ? AnimationSolver::FallDeepB : AnimationSolver::FallDeepA);
+          npc.setAnimRotate(0);
+          }
+        setState(Falling);
+        }
+'''
+)
+
+replace_once(
+    "common/graphics/mesh/animationsolver.cpp",
+'''  if(a==Anim::FallDeepA)
+    return solveFrm("S_FALL");
+  if(a==Anim::FallDeepB)
+    return solveFrm("S_FALLB");
+''',
+'''  if(a==Anim::FallDeepA) {
+    if(pose.isInAnim("S_FALLDN")) {
+      if(auto ret = solveFrm("T_FALLDN_2_FALL"))
+        return ret;
+      }
+    return solveFrm("S_FALL");
+    }
+  if(a==Anim::FallDeepB) {
+    if(pose.isInAnim("S_FALLDN")) {
+      if(auto ret = solveFrm("T_FALLDN_2_FALLB"))
+        return ret;
+      }
+    return solveFrm("S_FALLB");
+    }
+'''
+)
+
+replace_once(
+    "common/world/objects/npc.cpp",
+'''      const bool fallBack = visual.pose().isInAnim("S_FALLB");
+      lastHitType = fallBack ? 'B' : 'A';
+''',
+'''      const bool fallBack = visual.pose().isInAnim("S_FALLB") ||
+                            visual.pose().isInAnim("T_FALLDN_2_FALLB");
+      lastHitType = fallBack ? 'B' : 'A';
+'''
+)
+
+replace_once(
+    "common/world/objects/npc.cpp",
+'''bool Npc::isFallingDeep() const {
+  return (mvAlgo.isInAir() || mvAlgo.isFalling()) && (visual.pose().isInAnim("S_FALL") || visual.pose().isInAnim("S_FALLB"));
+  }
+''',
+'''bool Npc::isFallingDeep() const {
+  return (mvAlgo.isInAir() || mvAlgo.isFalling()) &&
+         (visual.pose().isInAnim("S_FALL") ||
+          visual.pose().isInAnim("S_FALLB") ||
+          visual.pose().isInAnim("T_FALLDN_2_FALL") ||
+          visual.pose().isInAnim("T_FALLDN_2_FALLB"));
+  }
+'''
+)
+
+print("FALLDEATH V4: one-shot deep-fall selection and original FALLDN transitions applied")
