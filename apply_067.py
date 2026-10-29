@@ -1090,3 +1090,175 @@ replace_once(
 )
 
 print("FALLDEATH V6: finished lethal landing has zero root-motion")
+
+
+# ZENGIN PHYSICS V8 / stage 1:
+# Recreate the missing zCCollObjectCharacter FLY spacing probes.
+#
+# Gothic II's zCCollObjectCharacter::TestSoftCollisions uses directional
+# front/back/left/right spacing rays (plus a center interference state) around
+# the character. OpenGothic 0.6.7 only uses the Bullet capsule for airborne
+# movement, which can miss sloped roof/wall contacts that vanilla catches.
+#
+# Important safety rule: this path only supplements a movement that the stock
+# OpenGothic capsule already considers fully clear. Existing capsule collisions,
+# ground landing, walking, doors and steps keep their old V6 path.
+replace_once(
+    "common/game/movealgo.h",
+'''    bool    tryMove   (const Tempest::Vec3& dp, DynamicWorld::CollisionTest& out);
+
+    void    setState(State f);
+''',
+'''    bool    tryMove   (const Tempest::Vec3& dp, DynamicWorld::CollisionTest& out);
+    bool    tryMoveZenGinFly(const Tempest::Vec3& dp, DynamicWorld::CollisionTest& out);
+
+    void    setState(State f);
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''bool MoveAlgo::tryMove(const Tempest::Vec3& dp, DynamicWorld::CollisionTest& out) {
+  return npc.tryMove(dp,out);
+  }
+
+void MoveAlgo::tickJumpup(uint64_t dt) {
+''',
+'''bool MoveAlgo::tryMove(const Tempest::Vec3& dp, DynamicWorld::CollisionTest& out) {
+  return npc.tryMove(dp,out);
+  }
+
+bool MoveAlgo::tryMoveZenGinFly(const Tempest::Vec3& dp, DynamicWorld::CollisionTest& out) {
+  const float moveLen = dp.length();
+  if(moveLen<=eps)
+    return tryMove(dp,out);
+
+  const auto pos0 = npc.position();
+
+  // Never override an existing OpenGothic hard collision. This stage only adds
+  // the spacing-ray contacts that the narrower airborne controller misses.
+  DynamicWorld::CollisionTest capsuleInfo;
+  if(!npc.physic.testMove(pos0+dp,capsuleInfo))
+    return tryMove(dp,out);
+
+  Tempest::Vec3 forward, right;
+  applyRotation(forward,Tempest::Vec3(0,0,1));
+  applyRotation(right,  Tempest::Vec3(1,0,0));
+
+  // ZenGin TestSoftCollisions derives spacing from the character primitive and
+  // uses ~0.9 of its lateral reach. radiusXZ() is OpenGothic's full model
+  // horizontal collision extent, unlike the smaller Bullet HumShape radius.
+  const float spacing = std::max(8.f,npc.physic.radiusXZ()*0.9f);
+
+  const float centerY = npc.physic.centerY();
+  const float feetY   = pos0.y;
+  const float lowY    = feetY + (centerY-feetY)*0.65f;
+
+  const Tempest::Vec3 offsets[] = {
+    Tempest::Vec3(0,0,0),
+    forward*spacing,
+    forward*(-spacing),
+    right*spacing,
+    right*(-spacing),
+    };
+
+  DynamicWorld::RayLandResult best;
+  best.hitFraction = 1.f;
+  bool hasHit = false;
+
+  auto probeBand = [&](float y) {
+    const Tempest::Vec3 base0(pos0.x,y,pos0.z);
+    for(auto off:offsets) {
+      const auto from = base0 + off;
+      const auto hit  = npc.world().physic()->ray(from,from+dp);
+      if(!hit.hasCol)
+        continue;
+
+      // DynamicWorld::ray intentionally has no useful normal for generic
+      // movable objects. The ZenGin FLY stage here is landscape-only.
+      if(hit.n.quadLength()<0.25f)
+        continue;
+
+      // Flat floor landing already has a dedicated and stable V6 path. Keep
+      // these probes for slopes, walls and ceilings.
+      if(hit.n.y>0.995f)
+        continue;
+
+      if(Tempest::Vec3::dotProduct(dp,hit.n)>=-0.001f)
+        continue;
+
+      if(!hasHit || hit.hitFraction<best.hitFraction) {
+        best   = hit;
+        hasHit = true;
+        }
+      }
+    };
+
+  // Original character controller keeps several directional ray caches around
+  // the collision pole. Two vertical bands approximate the model pole instead
+  // of turning the whole actor into an oversized capsule.
+  probeBand(centerY);
+  probeBand(lowY);
+
+  if(!hasHit)
+    return tryMove(dp,out);
+
+  static bool logged=false;
+  if(!logged) {
+    logged=true;
+    Tempest::Log::i("ZenGin FLY collision probes active: spacing=",spacing);
+    }
+
+  // Stop just before the earliest ray contact (2 cm skin, same order as the
+  // existing movement epsilon), then consume the remaining motion along the
+  // hit plane. This is deliberately a slide/projection, not OpenGothic's
+  // current 0.75 reflection/bounce.
+  float skinFrac = eps/moveLen;
+  float frac     = std::max(0.f,best.hitFraction-skinFrac);
+  frac           = std::min(frac,1.f);
+
+  if(frac>0.f) {
+    DynamicWorld::CollisionTest tmp;
+    if(!tryMove(dp*frac,tmp)) {
+      out=tmp;
+      return false;
+      }
+    }
+
+  const auto rest = dp*(1.f-frac);
+  const float into = Tempest::Vec3::dotProduct(rest,best.n);
+  auto slide = rest;
+  if(into<0.f)
+    slide -= best.n*into;
+
+  if(slide.quadLength()>eps*eps) {
+    DynamicWorld::CollisionTest tmp;
+    tryMove(slide,tmp);
+    }
+
+  const float speedInto = Tempest::Vec3::dotProduct(fallSpeed,best.n);
+  if(speedInto<0.f)
+    fallSpeed -= best.n*speedInto;
+
+  out.normal  = best.n;
+  out.landCol = true;
+  return true;
+  }
+
+void MoveAlgo::tickJumpup(uint64_t dt) {
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''  DynamicWorld::CollisionTest info;
+  if(!tryMove(dp,info)) {
+''',
+'''  DynamicWorld::CollisionTest info;
+  const bool zenGinFly = (state==InAir || state==Falling);
+  const bool moved = zenGinFly ? tryMoveZenGinFly(dp,info) : tryMove(dp,info);
+  if(!moved) {
+'''
+)
+
+print("ZENGIN PHYSICS V8: FLY directional spacing probes + plane slide applied")
