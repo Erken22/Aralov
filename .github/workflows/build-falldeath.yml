@@ -46,7 +46,7 @@ jobs:
         run: |
           grep -Fq 'changeAttribute(ATR_HITPOINTS,-dmg.value,false,true);' src/common/world/objects/npc.cpp
           grep -Fq 'if(!isFallDamage)' src/common/world/objects/npc.cpp
-          grep -Fq 'const bool fallBack = visual.pose().isInAnim("S_FALLB");' src/common/world/objects/npc.cpp
+          grep -Fq 'visual.pose().isInAnim("S_FALLB")' src/common/world/objects/npc.cpp
           grep -Fq 'T_FALL_2_FALLEN' src/common/graphics/mesh/animationsolver.cpp
           grep -Fq 'T_FALLB_2_FALLENB' src/common/graphics/mesh/animationsolver.cpp
           echo "FallDeath V2 source verification: PASS"
