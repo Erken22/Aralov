@@ -980,3 +980,68 @@ replace_once(
 )
 
 print("FALLDEATH V4: one-shot deep-fall selection and original FALLDN transitions applied")
+
+
+# FALLDEATH V5: lethal fall is a dead corpse, not a living FALLEN ambient.
+#
+# In OpenGothic, FallenA/B are tagged BS_LIE and T_FALL*_2_FALLEN* normally
+# continues into S_FALLEN/S_FALLENB. Those are living ambient loops
+# (HUM_AMB_FALLEN...), so a lethal fall can visibly breathe/move.
+#
+# Vanilla starts the fall landing transition before CreateFallDamage(), then
+# FALL damage suppresses the generic T_DEAD/T_DEADB path. Retag the already
+# active landing transition as BS_DEAD without restarting it, and keep its final
+# frame instead of advancing into the living FALLEN ambient loop.
+replace_once(
+    "common/world/objects/npc.cpp",
+'''  if(death) {
+    // ZenGin oCNpc::OnDamage_Anim suppresses its generic animation path
+    // when oEDamageType_Fall (0x80) is set. The movement/fall controller
+    // has already selected the appropriate landing pose.
+    if(!isFallDamage)
+      setAnim(lastHitType=='A' ? Anim::DeadA : Anim::DeadB);
+    } else {
+    setAnim(lastHitType=='A' ? Anim::UnconsciousA : Anim::UnconsciousB);
+    }
+''',
+'''  if(death) {
+    // ZenGin oCNpc::OnDamage_Anim suppresses its generic animation path
+    // when oEDamageType_Fall (0x80) is set. The movement/fall controller
+    // has already selected the appropriate landing pose.
+    if(!isFallDamage) {
+      setAnim(lastHitType=='A' ? Anim::DeadA : Anim::DeadB);
+      } else {
+      // Keep the exact landing transition and current frame timing, but mark
+      // the active layer dead. Pose::startAnim updates bs in-place when the
+      // same sequence is already running, so this does not restart animation.
+      if(visual.pose().isInAnim("T_FALL_2_FALLEN"))
+        playAnimByName("T_FALL_2_FALLEN",BS_DEAD);
+      else if(visual.pose().isInAnim("T_FALLB_2_FALLENB"))
+        playAnimByName("T_FALLB_2_FALLENB",BS_DEAD);
+      else if(visual.pose().isInAnim("S_FALLEN"))
+        playAnimByName("S_FALLEN",BS_DEAD);
+      else if(visual.pose().isInAnim("S_FALLENB"))
+        playAnimByName("S_FALLENB",BS_DEAD);
+      }
+    } else {
+    setAnim(lastHitType=='A' ? Anim::UnconsciousA : Anim::UnconsciousB);
+    }
+'''
+)
+
+replace_once(
+    "common/graphics/mesh/pose.cpp",
+'''    if(l.seq->animCls==Animation::Transition && l.seq->isFinished(tickCount,l.sAnim,combo.len())) {
+      auto next = solveNext(solver,l);
+''',
+'''    const bool deadFallLanding =
+        l.bs==BS_DEAD &&
+        (l.seq->name=="T_FALL_2_FALLEN" || l.seq->name=="T_FALLB_2_FALLENB");
+    if(l.seq->animCls==Animation::Transition &&
+       l.seq->isFinished(tickCount,l.sAnim,combo.len()) &&
+       !deadFallLanding) {
+      auto next = solveNext(solver,l);
+'''
+)
+
+print("FALLDEATH V5: lethal fall keeps dead landing pose and suppresses FALLEN ambient")
