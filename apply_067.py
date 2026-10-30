@@ -1090,3 +1090,142 @@ replace_once(
 )
 
 print("FALLDEATH V6: finished lethal landing has zero root-motion")
+
+
+# ZENGIN V9 FALL DISTANCE:
+# Gothic II does NOT reconstruct fall height from current impact velocity.
+# zCAIPlayer keeps fallDownStartY / fallDownDistanceY while state==FLY:
+#   fallDownDistanceY = fallDownStartY - centerPos.y
+# oCAniCtrl_Human::CheckFallStates passes that distance directly to
+# oCNpc::CreateFallDamage(float).
+#
+# Gothic2.exe 2.6(fix), oCNpc::CreateFallDamage @ 0x00681DA0:
+#   damage = (fallDownDistanceY + 50.0 - fallDownHeight) * 0.01 * fallDownDamage
+#
+# OpenGothic 0.6.7 instead derives a ballistic height from the *current*
+# fallSpeed. A roof/wall/slope contact can alter fallSpeed before landing,
+# underestimating the original fall and letting the actor survive, enter
+# S_SLIDE*, leave the roof and fall a second time.
+replace_once(
+    "common/game/movealgo.h",
+'''    Tempest::Vec3       fallSpeed ={};
+    float               fallCount=0.f;
+''',
+'''    Tempest::Vec3       fallSpeed ={};
+    float               fallCount=0.f;
+
+    // ZenGin zCAIPlayer::fallDownStartY. While movement state is FLY the
+    // distance is startY-current center Y; non-FLY frames reset the start.
+    float               fallDownStartY=std::numeric_limits<float>::quiet_NaN();
+'''
+)
+
+replace_once(
+    "common/world/objects/npc.h",
+'''    void      takeFallDamage(const Tempest::Vec3& fallSpeed);
+''',
+'''    void      takeFallDamage(const Tempest::Vec3& fallSpeed, float fallDistanceY);
+'''
+)
+
+replace_once(
+    "common/game/damagecalculator.h",
+'''    static Val     damageFall(Npc& src, float speed);
+''',
+'''    static Val     damageFall(Npc& src, float fallDistanceY);
+'''
+)
+
+replace_once(
+    "common/game/damagecalculator.cpp",
+'''DamageCalculator::Val DamageCalculator::damageFall(Npc& npc, float speed) {
+  auto  gl = npc.guild();
+  auto& g  = npc.world().script().guildVal();
+
+  float   gravity     = DynamicWorld::gravity;
+  float   fallTime    = speed/gravity;
+  float   height      = 0.5f*std::abs(gravity)*fallTime*fallTime;
+  float   h0          = float(g.falldown_height[gl]);
+  float   dmgPerMeter = float(g.falldown_damage[gl]);
+  int32_t prot        = npc.protection(::PROT_FALL);
+
+  Val ret;
+  ret.invincible = (prot<0);
+  ret.value      = int32_t(dmgPerMeter*(height-h0)/100.f - float(prot));
+''',
+'''DamageCalculator::Val DamageCalculator::damageFall(Npc& npc, float fallDistanceY) {
+  auto  gl = npc.guild();
+  auto& g  = npc.world().script().guildVal();
+
+  const float h0          = float(g.falldown_height[gl]);
+  const float dmgPerMeter = float(g.falldown_damage[gl]);
+  const int32_t prot      = npc.protection(::PROT_FALL);
+
+  // Exact Gothic II CreateFallDamage arithmetic:
+  //   (distanceY + 50 - fallDownHeight) * 0.01 * fallDownDamage
+  // The 50 cm term is present in Gothic2.exe at 0x00681E11.
+  const float raw = dmgPerMeter*(fallDistanceY + 50.f - h0)*0.01f;
+
+  Val ret;
+  ret.invincible = (prot<0);
+  ret.value      = int32_t(raw - float(prot));
+'''
+)
+
+replace_once(
+    "common/world/objects/npc.cpp",
+'''void Npc::takeFallDamage(const Vec3& fallSpeed) {
+''',
+'''void Npc::takeFallDamage(const Vec3& fallSpeed, float fallDistanceY) {
+'''
+)
+
+replace_once(
+    "common/world/objects/npc.cpp",
+'''  auto dmg = DamageCalculator::damageFall(*this,fallSpeed.length());
+''',
+'''  // ZenGin passes zCAIPlayer::fallDownDistanceY, not impact speed.
+  auto dmg = DamageCalculator::damageFall(*this,fallDistanceY);
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''  const auto state = flags;
+  const bool dead  = npc.isDead();
+''',
+'''  const auto state = flags;
+
+  // Gothic II zCAIPlayer::CalcStateVars / BeginStateSwitch:
+  // while state != FLY, fallDownStartY follows centerPos.y and distance is 0;
+  // while FLY, fallDownDistanceY is startY-current centerPos.y.
+  const bool fallFlight = (state==InAir || state==Falling ||
+                           state==Jump  || state==JumpUp);
+  if(!fallFlight || !std::isfinite(fallDownStartY))
+    fallDownStartY = npc.centerPosition().y;
+
+  const bool dead  = npc.isDead();
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''  if(state==InAir || state==Falling) {
+    // attach to ground
+    npc.takeFallDamage(fallSpeed);
+    setState(Run);
+    // ZenGin CheckFallStates() ends after fall damage/collision restoration.
+''',
+'''  if(state==InAir || state==Falling) {
+    // attach to ground
+    // Gothic II's CheckFallStates() feeds the accumulated vertical drop
+    // (fallDownDistanceY) into CreateFallDamage before restoring collision.
+    const float fallDistanceY =
+        std::max(0.f,fallDownStartY - npc.centerPosition().y);
+    npc.takeFallDamage(fallSpeed,fallDistanceY);
+    setState(Run);
+    // ZenGin CheckFallStates() ends after fall damage/collision restoration.
+'''
+)
+
+print("ZENGIN V9 FALL DISTANCE: exact Gothic II fallDownDistanceY damage path applied")
