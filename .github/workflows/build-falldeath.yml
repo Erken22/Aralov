@@ -1,8 +1,8 @@
-name: Build OpenGothic 0.6.7 FIX25 FallDeath V2
+name: Build OpenGothic 0.6.7 FIX25 ZenGin V9
 
 on:
   push:
-    branches: [falldeath-fix25-isolated]
+    branches: [falldeath-v6-zengin-v9]
     paths:
       - apply_067.py
       - ci/prepare_turnip.sh
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: opengothic-fix25-falldeath-v2-isolated
+  group: opengothic-fix25-zengin-v9
   cancel-in-progress: true
 
 permissions:
@@ -49,7 +49,10 @@ jobs:
           grep -Fq 'visual.pose().isInAnim("S_FALLB")' src/common/world/objects/npc.cpp
           grep -Fq 'T_FALL_2_FALLEN' src/common/graphics/mesh/animationsolver.cpp
           grep -Fq 'T_FALLB_2_FALLENB' src/common/graphics/mesh/animationsolver.cpp
-          echo "FallDeath V2 source verification: PASS"
+                    grep -Fq 'fallDownStartY' src/common/game/movealgo.h
+          grep -Fq 'fallDistanceY + 50.f - h0' src/common/game/damagecalculator.cpp
+          grep -Fq 'npc.takeFallDamage(fallSpeed,fallDistanceY);' src/common/game/movealgo.cpp
+          echo "FallDeath V6 + ZenGin V9 source verification: PASS"
 
       - uses: actions/setup-java@v5
         with:
