@@ -1262,3 +1262,137 @@ replace_once(
 )
 
 print("ZENGIN PHYSICS V8: FLY directional spacing probes + plane slide applied")
+
+
+# ZENGIN PHYSICS V9 / stage 2:
+# Preserve ZenGin's FLY -> SLIDE -> FALL sequence on steep floor contacts.
+#
+# Vanilla zCCollObjectCharacter has separate FLY and SLIDE config states.
+# OpenGothic 0.6.7 tests "still above ground" before its slide transition,
+# so an airborne actor can pass a steep roof without ever entering S_SLIDE.
+# Carry the FLY probe contact into implTick, attach the feet to the contacted
+# plane, project velocity onto it and enter Slide before the generic airborne
+# early-return. The existing S_SLIDE/S_SLIDEB animation and Slide integrator
+# then own the motion until support is lost.
+replace_once(
+    "common/physics/dynamicworld.h",
+'''      Tempest::Vec3 partial = {};
+      Tempest::Vec3 normal  = {};
+      bool          preFall = false;
+''',
+'''      Tempest::Vec3 partial = {};
+      Tempest::Vec3 normal  = {};
+      bool          preFall = false;
+
+      // ZenGin character-controller compatibility: a supplemental FLY probe
+      // may report a landscape contact even when the stock capsule path is
+      // otherwise clear.
+      bool          flyProbe = false;
+      Tempest::Vec3 flyHit   = {};
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''  out.normal  = best.n;
+  out.landCol = true;
+  return true;
+  }
+''',
+'''  out.normal   = best.n;
+  out.landCol  = true;
+  out.flyProbe = true;
+  out.flyHit   = best.v;
+  return true;
+  }
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''  if(canFlyOverWater() && ground<water) {
+    dY      = pos.y-water;
+    // onGound = false;
+    //NOTE: should disable slide
+    }
+  else if(std::isfinite(water) && ground+chest<water && npc.hasSwimAnimations() && !dead) {
+    dY      = std::min((pos.y+chest)-water, stickThreshold);
+    }
+
+  if(dp==Tempest::Vec3() && pos.y==ground && state!=Jump && state!=Slide)
+''',
+'''  if(canFlyOverWater() && ground<water) {
+    dY      = pos.y-water;
+    // onGound = false;
+    //NOTE: should disable slide
+    }
+  else if(std::isfinite(water) && ground+chest<water && npc.hasSwimAnimations() && !dead) {
+    dY      = std::min((pos.y+chest)-water, stickThreshold);
+    }
+
+  // ZenGin FLY -> SLIDE transition.
+  //
+  // TestHardCollisions() treats a steep floor hit as an actual character
+  // surface contact. OpenGothic's generic airborne branch below would return
+  // early for every positive dY and therefore never reach its Slide state.
+  // Use the exact plane reported by the supplemental FLY probe, put the feet
+  // onto that plane and switch state before the airborne early-return.
+  if(zenGinFly && info.flyProbe && !dead && info.normal.y>0.05f) {
+    DynamicWorld::CollisionTest slideInfo;
+    if(testSlide(pos,info.normal,slideInfo)) {
+      const auto& n = info.normal;
+      const auto& h = info.flyHit;
+
+      const float planeY = h.y -
+          (n.x*(pos.x-h.x) + n.z*(pos.z-h.z))/n.y;
+      const float snap   = pos.y-planeY;
+      const float maxSnap = std::max(stepHeight(),npc.physic.groundOffset());
+
+      if(std::fabs(snap)<=maxSnap) {
+        DynamicWorld::CollisionTest snapInfo;
+        tryMove(Tempest::Vec3(0,-snap,0),snapInfo);
+        }
+
+      // Keep only velocity tangent to the roof. This matches the character
+      // controller notion of sliding on a hard surface instead of bouncing.
+      const float into = Tempest::Vec3::dotProduct(fallSpeed,n);
+      if(into<0.f)
+        fallSpeed -= n*into;
+
+      npc.setAnimRotate(0);
+      npc.setAnim(slideDir() ? AnimationSolver::SlideA : AnimationSolver::SlideB);
+      setState(Slide);
+
+      static bool slideLogged=false;
+      if(!slideLogged) {
+        slideLogged=true;
+        Tempest::Log::i("ZenGin FLY->SLIDE contact active: normalY=",n.y,
+                        " snap=",snap);
+        }
+      return true;
+      }
+    }
+
+  if(dp==Tempest::Vec3() && pos.y==ground && state!=Jump && state!=Slide)
+'''
+)
+
+replace_once(
+    "common/game/movealgo.cpp",
+'''    case InAir:
+      assert(f==Run || f==Falling || f==InWater || f==Swim || f==Dive);
+      break;
+    case Falling:
+      assert(f==Run || f==InAir || f==InWater || f==Swim || f==Dive);
+      break;
+''',
+'''    case InAir:
+      assert(f==Run || f==Falling || f==Slide || f==InWater || f==Swim || f==Dive);
+      break;
+    case Falling:
+      assert(f==Run || f==InAir || f==Slide || f==InWater || f==Swim || f==Dive);
+      break;
+'''
+)
+
+print("ZENGIN PHYSICS V9: steep FLY contact now enters SLIDE before FALL")
